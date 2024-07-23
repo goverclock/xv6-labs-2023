@@ -7,7 +7,9 @@
 int main(int argc, char* argv[]) {
     char buf[512];
     char* nargv[MAXARG];
-    for (int i = 1; i < argc; i++) nargv[i - 1] = argv[i];
+    for (int i = 1; i < argc; i++) {
+        nargv[i - 1] = argv[i];
+    }
 
     while (1) {
         int ind = -1;
@@ -22,9 +24,9 @@ int main(int argc, char* argv[]) {
         buf[ind] = '\0';
         nargv[argc - 1] = buf;
 
-        if (fork() == 0) 
+        if (fork() == 0)
             exec(nargv[0], nargv);
-        else 
+        else
             wait(0);
     }
 

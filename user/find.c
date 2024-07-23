@@ -3,12 +3,13 @@
 #include "user/user.h"
 #include "kernel/fs.h"
 
-char *lastname(char *path) {
-    char *p;
+char *basename(char *path) {
+    char *p = path + strlen(path);
 
     // Find first character after last slash.
-    for (p = path + strlen(path); p >= path && *p != '/'; p--)
-        ;
+    while (p >= path && *p != '/') {
+        p--;
+    }
     p++;
 
     return p;
@@ -41,7 +42,9 @@ void find(char *path, char *tar) {
 
     switch (st.type) {
         case T_FILE:
-            if (!strcmp(lastname(path), tar)) printf("%s\n", path);
+            if (!strcmp(basename(path), tar)) {
+                printf("%s\n", path);
+            }
             break;
         case T_DIR:
             if (strlen(tar) + 1 + DIRSIZ + 1 > sizeof buf) {
@@ -74,7 +77,9 @@ int main(int argc, char *argv[]) {
         exit(1);
     }
 
-    for (int i = 1; i < argc; i++) find(".", argv[i]);
+    for (int i = 1; i < argc; i++) {
+        find(".", argv[i]);
+    }
 
     exit(0);
 }
