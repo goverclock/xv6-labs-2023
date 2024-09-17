@@ -108,8 +108,6 @@ sys_sigalarm(void)
   p->last_alarmed = 0;
   p->alarm_handler = handler;
 
-//  printf("interval=%d, handler=%p\n", nticks, handler);
-
   return 0;
 }
 
@@ -125,5 +123,7 @@ sys_sigreturn(void)
   p->trapframe->a0 = p->intr_a0;
   p->trapframe->a1 = p->intr_a1;
 
-  return 0;
+  p->intr_epc = MAXVA;
+
+  return p->trapframe->a0;
 }

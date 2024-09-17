@@ -127,6 +127,7 @@ found:
   p->alarm_interval = 0;
   p->last_alarmed = 0;
   p->alarm_handler = 0;
+  p->intr_epc = MAXVA;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){

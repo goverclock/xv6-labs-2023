@@ -68,16 +68,15 @@ usertrap(void)
   } else if((which_dev = devintr()) != 0){
     if (which_dev == 2 && p->alarm_interval != 0) {
       p->last_alarmed = (p->last_alarmed + 1) % p->alarm_interval;
-      if (p->last_alarmed == 0) {
+      if (p->last_alarmed == 0 && p->intr_epc == MAXVA) {
         p->intr_epc = p->trapframe->epc;
-        printf("intr_epc=%p\n", p->intr_epc);
-        p->trapframe->epc = p->alarm_handler;
-
         p->intr_sp = p->trapframe->sp;
         p->intr_s0 = p->trapframe->s0;
         p->intr_ra = p->trapframe->ra;
         p->intr_a0 = p->trapframe->a0;
         p->intr_a1 = p->trapframe->a1;
+
+        p->trapframe->epc = p->alarm_handler;
       }
     }
     intr_on();
