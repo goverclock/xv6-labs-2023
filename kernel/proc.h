@@ -99,6 +99,12 @@ struct proc {
   int alarm_interval;         // ticks between alarms, 0 for no alarm
   int last_alarmed;           // how many ticks has passed since last alarm
   uint64 alarm_handler;       // handler to call upon alarm
+  uint64 intr_epc;            // where to return to after executing handler
+  uint64 intr_sp;
+  uint64 intr_s0;
+  uint64 intr_ra;
+  uint64 intr_a0;
+  uint64 intr_a1;
 
   // these are private to the process, so p->lock need not be held.
   uint64 kstack;               // Virtual address of kernel stack
