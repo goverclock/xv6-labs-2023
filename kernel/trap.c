@@ -11,6 +11,8 @@ uint ticks;
 
 extern char trampoline[], uservec[], userret[];
 
+extern uint32 page_ref_count[];
+
 // in kernelvec.S, calls kerneltrap().
 void kernelvec();
 
@@ -50,8 +52,11 @@ usertrap(void)
   // save user program counter.
   p->trapframe->epc = r_sepc();
   
-  if(r_scause() == 8){
+  uint64 scause = r_scause();
+  int handled = 0;
+  if(scause == 8){
     // system call
+    handled = 1;
 
     if(killed(p))
       exit(-1);
@@ -67,8 +72,42 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
-  } else {
-    printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
+    handled = 1;
+  } else if(scause == 15){
+    // store/AMO page fault
+    pte_t *pte;
+    uint64 va = r_stval();
+    if((pte = walk(p->pagetable, va, 0)) == 0)
+      panic("fuck no pagetable entry");
+
+    if(*pte & PTE_COW){
+//      printf("ok COW %p\n", va);
+      handled = 1;
+
+      uint64 pa = PTE2PA(*pte);
+      if(page_ref_count[(uint64)pa / PGSIZE] == 1) {
+        // if there is already no other pte referencing this page,
+        // just remove PTE_COW flag
+        *pte &= ~PTE_COW;
+        *pte |= PTE_W;
+      } else {
+        // copy the faulting page
+        char *mem;
+        if((mem = kalloc()) == 0)
+          panic("fuck kalloc fail");
+        memmove(mem, (char*)pa, PGSIZE);
+
+        // remap page with PTE_W flag
+        uint flags = (PTE_FLAGS(*pte) | PTE_W) & ~PTE_COW;
+        uvmunmap(p->pagetable, PGROUNDDOWN(va), 1, 1);
+        if(mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, flags) != 0)
+          panic("fuck mappage fail");
+      }
+    }
+  }
+
+  if(!handled){
+    printf("usertrap(): unexpected scause %p pid=%d\n", scause, p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     setkilled(p);
   }

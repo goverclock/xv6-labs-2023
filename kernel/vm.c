@@ -15,6 +15,8 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+extern uint32 page_ref_count[];
+
 // Make a direct-map page table for the kernel.
 pagetable_t
 kvmmake(void)
@@ -133,6 +135,8 @@ kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 {
   if(mappages(kpgtbl, va, sz, pa, perm) != 0)
     panic("kvmmap");
+  for(int i = 0; i < PHYSTOP / PGSIZE; i++)
+    page_ref_count[i] = 0;
 }
 
 // Create PTEs for virtual addresses starting at va that refer to
@@ -163,6 +167,12 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     if(*pte & PTE_V)
       panic("mappages: remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
+    page_ref_count[pa / PGSIZE] += 1;
+
+    if (pa == 0x00000000833d8000) {
+      printf("+");
+      printf("%d", page_ref_count[pa / PGSIZE]);
+    }
     if(a == last)
       break;
     a += PGSIZE;
@@ -190,11 +200,13 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not mapped");
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
+
+    uint64 pa = PTE2PA(*pte);
+    page_ref_count[pa / PGSIZE] -= 1;
+    *pte = 0;
     if(do_free){
-      uint64 pa = PTE2PA(*pte);
       kfree((void*)pa);
     }
-    *pte = 0;
   }
 }
 
@@ -312,10 +324,9 @@ uvmfree(pagetable_t pagetable, uint64 sz)
 int
 uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 {
-  pte_t *pte;
+  pte_t *pte, *new_pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -324,12 +335,17 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
+    // map new page at the same physical address as old
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
       goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
-      goto err;
+    }
+    if(flags & PTE_W){
+      if((new_pte = walk(new, i, 0)) == 0)
+        panic("uvmcopy: fuck");
+      *pte |= PTE_COW;    // mark both old and new page as COW
+      *new_pte |= PTE_COW;
+      *pte &= ~PTE_W;     // mark both old and new page as not writable
+      *new_pte &= ~PTE_W;
     }
   }
   return 0;
