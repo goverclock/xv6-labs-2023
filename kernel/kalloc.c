@@ -55,7 +55,8 @@ kfree(void *pa)
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
 
-  if(page_ref_count[(uint64)pa / PGSIZE] != 0) {
+  int rc = page_ref_count[(uint64)pa / PGSIZE];
+  if(rc) {
     return;
   }
 

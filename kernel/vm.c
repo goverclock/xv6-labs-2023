@@ -255,7 +255,10 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
       return 0;
     }
     memset(mem, 0, PGSIZE);
-    if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_R|PTE_U|xperm) != 0){
+    acquire(&rc_lock);
+    int ret = mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_R|PTE_U|xperm);
+    release(&rc_lock);
+    if(ret){
       kfree(mem);
       uvmdealloc(pagetable, a, oldsz);
       return 0;
@@ -276,7 +279,9 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
+    acquire(&rc_lock);
     uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
+    release(&rc_lock);
   }
 
   return newsz;
@@ -333,7 +338,10 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     // map new page at the same physical address as old
-    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+    acquire(&rc_lock);
+    int ret = mappages(new, i, PGSIZE, (uint64)pa, flags) != 0;
+    release(&rc_lock);
+    if(ret){
       goto err;
     }
     if(flags & PTE_W){
@@ -379,9 +387,40 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
     if(va0 >= MAXVA)
       return -1;
     pte = walk(pagetable, va0, 0);
-    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0 ||
-       (*pte & PTE_W) == 0)
+    if(pte == 0 || (*pte & PTE_V) == 0 || (*pte & PTE_U) == 0)  // invalid dstva
       return -1;
+    if(!(*pte & PTE_W) && !(*pte & PTE_COW))    // dstva not writable
+      return -1;
+    if(*pte & PTE_COW){   // dstva is COW page
+      uint64 pa = PTE2PA(*pte);
+
+      acquire(&rc_lock);
+      if(page_ref_count[(uint64)pa / PGSIZE] == 0) {
+        panic("why?");
+      } else if(page_ref_count[(uint64)pa / PGSIZE] == 1) {
+        // if there is already no other pte referencing this page,
+        // just remove PTE_COW flag
+        *pte &= ~PTE_COW;
+        *pte |= PTE_W;
+      } else {
+        // copy the faulting page
+        char *mem;
+        if((mem = kalloc()) == 0)
+          panic("fuck kalloc fail");
+        memmove(mem, (char*)pa, PGSIZE);
+
+        // remap page with PTE_W flag
+        uint flags = (PTE_FLAGS(*pte) | PTE_W) & ~PTE_COW;
+
+        uvmunmap(pagetable, PGROUNDDOWN(va0), 1, 1);
+        if(mappages(pagetable, PGROUNDDOWN(va0), PGSIZE, (uint64)mem, flags) != 0)
+          panic("fuck mappage fail");
+      }
+      release(&rc_lock);
+
+      pte = walk(pagetable, va0, 0);
+    }
+
     pa0 = PTE2PA(*pte);
     n = PGSIZE - (dstva - va0);
     if(n > len)
