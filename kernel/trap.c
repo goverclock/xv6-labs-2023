@@ -11,6 +11,7 @@ uint ticks;
 
 extern char trampoline[], uservec[], userret[];
 
+extern struct spinlock rc_lock;
 extern uint32 page_ref_count[];
 
 // in kernelvec.S, calls kerneltrap().
@@ -81,11 +82,14 @@ usertrap(void)
       panic("fuck no pagetable entry");
 
     if(*pte & PTE_COW){
-//      printf("ok COW %p\n", va);
       handled = 1;
 
       uint64 pa = PTE2PA(*pte);
-      if(page_ref_count[(uint64)pa / PGSIZE] == 1) {
+
+      acquire(&rc_lock);
+      if(page_ref_count[(uint64)pa / PGSIZE] == 0) {
+        panic("why?");
+      } else if(page_ref_count[(uint64)pa / PGSIZE] == 1) {
         // if there is already no other pte referencing this page,
         // just remove PTE_COW flag
         *pte &= ~PTE_COW;
@@ -99,10 +103,12 @@ usertrap(void)
 
         // remap page with PTE_W flag
         uint flags = (PTE_FLAGS(*pte) | PTE_W) & ~PTE_COW;
+
         uvmunmap(p->pagetable, PGROUNDDOWN(va), 1, 1);
         if(mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, flags) != 0)
           panic("fuck mappage fail");
       }
+      release(&rc_lock);
     }
   }
 

@@ -15,6 +15,7 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
+extern struct spinlock rc_lock;
 extern uint32 page_ref_count[];
 
 // Make a direct-map page table for the kernel.
@@ -169,10 +170,6 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
     *pte = PA2PTE(pa) | perm | PTE_V;
     page_ref_count[pa / PGSIZE] += 1;
 
-    if (pa == 0x00000000833d8000) {
-      printf("+");
-      printf("%d", page_ref_count[pa / PGSIZE]);
-    }
     if(a == last)
       break;
     a += PGSIZE;
