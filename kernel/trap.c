@@ -78,10 +78,9 @@ usertrap(void)
     // store/AMO page fault
     pte_t *pte;
     uint64 va = r_stval();
-    if((pte = walk(p->pagetable, va, 0)) == 0)
-      panic("fuck no pagetable entry");
-
-    if(*pte & PTE_COW){
+    if((pte = walk(p->pagetable, va, 0)) == 0) {
+      // handled = 0;
+    } else if(*pte & PTE_COW){
       handled = 1;
 
       uint64 pa = PTE2PA(*pte);
