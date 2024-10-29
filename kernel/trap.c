@@ -104,8 +104,8 @@ usertrap(void)
         // remap page with PTE_W flag
         uint flags = (PTE_FLAGS(*pte) | PTE_W) & ~PTE_COW;
 
-        uvmunmap(p->pagetable, PGROUNDDOWN(va), 1, 1);
-        if(mappages(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, flags) != 0)
+        uvmunmapL(p->pagetable, PGROUNDDOWN(va), 1, 1);
+        if(mappagesL(p->pagetable, PGROUNDDOWN(va), PGSIZE, (uint64)mem, flags) != 0)
           panic("fuck mappage fail");
       }
       release(&rc_lock);

@@ -48,7 +48,7 @@ kvmmake(void)
 
   // allocate and map a kernel stack for each process.
   proc_mapstacks(kpgtbl);
-  
+
   return kpgtbl;
 }
 
@@ -134,10 +134,12 @@ walkaddr(pagetable_t pagetable, uint64 va)
 void
 kvmmap(pagetable_t kpgtbl, uint64 va, uint64 pa, uint64 sz, int perm)
 {
-  if(mappages(kpgtbl, va, sz, pa, perm) != 0)
+  acquire(&rc_lock);
+  if(mappagesL(kpgtbl, va, sz, pa, perm) != 0)
     panic("kvmmap");
-  for(int i = 0; i < PHYSTOP / PGSIZE; i++)
-    page_ref_count[i] = 0;
+  for(uint64 i = pa; i < pa + sz; i += PGSIZE)
+    page_ref_count[i / PGSIZE] = 0;
+  release(&rc_lock);
 }
 
 // Create PTEs for virtual addresses starting at va that refer to
@@ -167,6 +169,43 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
       return -1;
     if(*pte & PTE_V)
       panic("mappages: remap");
+
+    acquire(&rc_lock);
+    *pte = PA2PTE(pa) | perm | PTE_V;
+    page_ref_count[pa / PGSIZE] += 1;
+    release(&rc_lock);
+
+    if(a == last)
+      break;
+    a += PGSIZE;
+    pa += PGSIZE;
+  }
+  return 0;
+}
+
+int
+mappagesL(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
+{
+  uint64 a, last;
+  pte_t *pte;
+
+  if((va % PGSIZE) != 0)
+    panic("mappages: va not aligned");
+
+  if((size % PGSIZE) != 0)
+    panic("mappages: size not aligned");
+
+  if(size == 0)
+    panic("mappages: size");
+
+  a = va;
+  last = va + size - PGSIZE;
+  for(;;){
+    if((pte = walk(pagetable, a, 1)) == 0)
+      return -1;
+    if(*pte & PTE_V)
+      panic("mappages: remap");
+
     *pte = PA2PTE(pa) | perm | PTE_V;
     page_ref_count[pa / PGSIZE] += 1;
 
@@ -199,13 +238,42 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
       panic("uvmunmap: not a leaf");
 
     uint64 pa = PTE2PA(*pte);
+    acquire(&rc_lock);
     page_ref_count[pa / PGSIZE] -= 1;
     *pte = 0;
-    if(do_free){
+    if(do_free && page_ref_count[pa / PGSIZE] == 0){
+      kfree((void*)pa);
+    }
+    release(&rc_lock);
+  }
+}
+
+void
+uvmunmapL(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
+{
+  uint64 a;
+  pte_t *pte;
+
+  if((va % PGSIZE) != 0)
+    panic("uvmunmap: not aligned");
+
+  for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
+    if((pte = walk(pagetable, a, 0)) == 0)
+      panic("uvmunmap: walk");
+    if((*pte & PTE_V) == 0)
+      panic("uvmunmap: not mapped");
+    if(PTE_FLAGS(*pte) == PTE_V)
+      panic("uvmunmap: not a leaf");
+
+    uint64 pa = PTE2PA(*pte);
+    page_ref_count[pa / PGSIZE] -= 1;
+    *pte = 0;
+    if(do_free && page_ref_count[pa / PGSIZE] == 0){
       kfree((void*)pa);
     }
   }
 }
+
 
 // create an empty user page table.
 // returns 0 if out of memory.
@@ -255,9 +323,7 @@ uvmalloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz, int xperm)
       return 0;
     }
     memset(mem, 0, PGSIZE);
-    acquire(&rc_lock);
     int ret = mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_R|PTE_U|xperm);
-    release(&rc_lock);
     if(ret){
       kfree(mem);
       uvmdealloc(pagetable, a, oldsz);
@@ -279,9 +345,7 @@ uvmdealloc(pagetable_t pagetable, uint64 oldsz, uint64 newsz)
 
   if(PGROUNDUP(newsz) < PGROUNDUP(oldsz)){
     int npages = (PGROUNDUP(oldsz) - PGROUNDUP(newsz)) / PGSIZE;
-    acquire(&rc_lock);
     uvmunmap(pagetable, PGROUNDUP(newsz), npages, 1);
-    release(&rc_lock);
   }
 
   return newsz;
@@ -338,9 +402,7 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     // map new page at the same physical address as old
-    acquire(&rc_lock);
     int ret = mappages(new, i, PGSIZE, (uint64)pa, flags) != 0;
-    release(&rc_lock);
     if(ret){
       goto err;
     }
@@ -412,8 +474,8 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
         // remap page with PTE_W flag
         uint flags = (PTE_FLAGS(*pte) | PTE_W) & ~PTE_COW;
 
-        uvmunmap(pagetable, PGROUNDDOWN(va0), 1, 1);
-        if(mappages(pagetable, PGROUNDDOWN(va0), PGSIZE, (uint64)mem, flags) != 0)
+        uvmunmapL(pagetable, PGROUNDDOWN(va0), 1, 1);
+        if(mappagesL(pagetable, PGROUNDDOWN(va0), PGSIZE, (uint64)mem, flags) != 0)
           panic("fuck mappage fail");
       }
       release(&rc_lock);
