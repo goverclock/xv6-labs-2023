@@ -20,6 +20,9 @@ static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
 
+extern uint64 kalloc_count;
+extern uint64 mem_copy_count;
+
 // helps ensure that wakeups of wait()ing
 // parents are not lost. helps obey the
 // memory model when using p->parent.
@@ -346,6 +349,7 @@ reparent(struct proc *p)
 void
 exit(int status)
 {
+  printf("\nexiting: %d %d\n", kalloc_count, mem_copy_count);
   struct proc *p = myproc();
 
   if(p == initproc)

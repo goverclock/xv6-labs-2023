@@ -16,6 +16,7 @@ extern char end[]; // first address after kernel.
 
 struct spinlock rc_lock;
 uint32 page_ref_count[PHYSTOP / PGSIZE];
+uint64 kalloc_count;
 
 struct run {
   struct run *next;
@@ -75,6 +76,7 @@ kalloc(void)
   struct run *r;
 
   acquire(&kmem.lock);
+  kalloc_count += 1;
   r = kmem.freelist;
   if(r)
     kmem.freelist = r->next;

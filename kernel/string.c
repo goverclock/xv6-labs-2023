@@ -1,4 +1,11 @@
 #include "types.h"
+#include "spinlock.h"
+
+struct spinlock copy_count_lock;
+uint64 mem_copy_count;
+
+void acquire(struct spinlock *lk);
+void release(struct spinlock *lk);
 
 void*
 memset(void *dst, int c, uint n)
@@ -30,6 +37,9 @@ memcmp(const void *v1, const void *v2, uint n)
 void*
 memmove(void *dst, const void *src, uint n)
 {
+  acquire(&copy_count_lock);
+  mem_copy_count += 1;
+  release(&copy_count_lock);
   const char *s;
   char *d;
 
