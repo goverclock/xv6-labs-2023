@@ -1,0 +1,4 @@
+thread A&B both done executing e->next = n;
+then thread A executes *p = e; and thread B after
+now the key thread A trying to insert is lost
+
